@@ -1,0 +1,13 @@
+**/bin/
+**/obj/
+*.mdb
+*.ldb
+*.accdb
+*.log
+*.zip
+*.exe
+*.pdb
+*.user
+*.suo
+.vs/
+secrets/
