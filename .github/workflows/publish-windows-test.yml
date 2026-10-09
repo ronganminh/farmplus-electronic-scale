@@ -25,6 +25,7 @@ jobs:
       RELEASE_TAG: ${{ inputs.tag }}
       BUNDLE_NAME: FarmPlus_Manual_v2_PUBLIC_TEST.zip
       EXPECTED_EXE_SHA256: 8859ee18f9f1bdebd14ef38b1843bc0c57d5ca062611d3aa28e796b5fcf640ba
+      EXPECTED_BUNDLE_SHA256: 647bc140fa15982b3bee298b9bad23c0ee1d7d42f224c1f42b342b84c7598cd8
     steps:
       - name: Checkout validation code
         uses: actions/checkout@v4
@@ -37,8 +38,11 @@ jobs:
       - name: Build and run independent formatting tests
         shell: pwsh
         run: |
+          $ErrorActionPreference = 'Stop'
           dotnet build src/ScaleInput/ScaleInput.csproj -c Release
+          if ($LASTEXITCODE -ne 0) { throw 'Formatter build failed' }
           dotnet run --project tests/ScaleInput.SmokeTests/ScaleInput.SmokeTests.csproj -c Release
+          if ($LASTEXITCODE -ne 0) { throw 'Formatter smoke tests failed' }
 
       - name: Download staged bundle from draft release
         shell: pwsh
@@ -55,6 +59,8 @@ jobs:
           Add-Type -AssemblyName System.IO.Compression.FileSystem
           $bundle = Join-Path 'staging' $env:BUNDLE_NAME
           if (-not (Test-Path -LiteralPath $bundle -PathType Leaf)) { throw 'ZIP bundle was not found' }
+          $bundleHash = (Get-FileHash -LiteralPath $bundle -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($bundleHash -ne $env:EXPECTED_BUNDLE_SHA256) { throw "Unexpected ZIP SHA256: $bundleHash" }
           $archive = [System.IO.Compression.ZipFile]::OpenRead((Resolve-Path $bundle).Path)
           try {
             $names = @($archive.Entries | ForEach-Object FullName)
@@ -94,12 +100,24 @@ jobs:
       - name: Re-upload verified bundle into Release using GitHub Actions
         shell: pwsh
         run: |
-          gh release upload "$env:RELEASE_TAG" "staging/$env:BUNDLE_NAME" --repo "$env:GITHUB_REPOSITORY" --clobber
-          if ($LASTEXITCODE -ne 0) { throw 'Release upload failed' }
+          $isDraft = gh release view "$env:RELEASE_TAG" --repo "$env:GITHUB_REPOSITORY" --json isDraft --jq .isDraft
+          if ($LASTEXITCODE -ne 0) { throw 'Unable to inspect release draft state' }
+          if ($isDraft -eq 'true') {
+            gh release upload "$env:RELEASE_TAG" "staging/$env:BUNDLE_NAME" --repo "$env:GITHUB_REPOSITORY" --clobber
+            if ($LASTEXITCODE -ne 0) { throw 'Release upload failed' }
+          } else {
+            Write-Host 'Release is already published: verified binary matches, no asset overwrite required'
+          }
 
       - name: Publish verified test release
         shell: pwsh
         run: |
-          gh release edit "$env:RELEASE_TAG" --repo "$env:GITHUB_REPOSITORY" --draft=false --prerelease
-          if ($LASTEXITCODE -ne 0) { throw 'Release publication failed' }
+          $isDraft = gh release view "$env:RELEASE_TAG" --repo "$env:GITHUB_REPOSITORY" --json isDraft --jq .isDraft
+          if ($LASTEXITCODE -ne 0) { throw 'Unable to inspect release publication state' }
+          if ($isDraft -eq 'true') {
+            gh release edit "$env:RELEASE_TAG" --repo "$env:GITHUB_REPOSITORY" --draft=false --prerelease
+            if ($LASTEXITCODE -ne 0) { throw 'Release publication failed' }
+          } else {
+            Write-Host 'Release was already published'
+          }
           Write-Host "RELEASE PASS: https://github.com/$env:GITHUB_REPOSITORY/releases/tag/$env:RELEASE_TAG"
