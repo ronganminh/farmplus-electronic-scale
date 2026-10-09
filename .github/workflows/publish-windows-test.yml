@@ -37,7 +37,7 @@ jobs:
       - name: Build and run independent formatting tests
         shell: pwsh
         run: |
-          dotnet build src/ScaleInput/ScaleInput.csproj -c Release --no-restore
+          dotnet build src/ScaleInput/ScaleInput.csproj -c Release
           dotnet run --project tests/ScaleInput.SmokeTests/ScaleInput.SmokeTests.csproj -c Release
 
       - name: Download staged bundle from draft release
